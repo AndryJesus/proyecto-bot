@@ -31,15 +31,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "https://pagina-render-wtbx.onrender.com/citas", // URL de tu frontend Astro
-    methods: ["GET", "POST"]
+    origin: "https://pagina-render-wtbx.onrender.com", // SOLO EL DOMINIO, sin /citas
+    methods: ["GET", "POST"],
+    credentials: true
   }
-});
-
-// Iniciar servidor de WebSockets en un puerto DIFERENTE al del bot
-const WS_PORT = process.env.WS_PORT || 3002;
-server.listen(WS_PORT, () => {
-  console.log(`🚀 Servidor de WebSockets ejecutándose en puerto ${WS_PORT}`);
 });
 
 // Variable global para controlar el estado
@@ -477,6 +472,15 @@ io.on('connection', (socket) => {
     });
 });
 
+// Endpoint de health check para Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    message: 'Bot and WebSockets running',
+    timestamp: new Date().toISOString()
+  });
+});
+
 try {
     // Parsear la connection string
     const dbConfig = parse(CONNECTION_STRING);
@@ -523,8 +527,14 @@ try {
         adapterProviderInstance = adapterProvider;
 
         console.log('✅ Bot iniciado correctamente con base de desarrollo');
-        console.log(`🌐 Servidor de WebSockets escuchando en puerto ${WS_PORT}`);
-        console.log(`📱 Frontend debe conectarse a: http://localhost:${WS_PORT}`);
+        
+        // 🚨 USAR EL PUERTO PRINCIPAL DE RENDER
+        const PORT = process.env.PORT || 3001;
+        server.listen(PORT, () => {
+            console.log(`🚀 Bot y WebSockets ejecutándose en puerto ${PORT}`);
+            console.log(`📱 Frontend debe conectarse a este mismo puerto`);
+            console.log(`🌐 Health check disponible en: /health`);
+        });
         
         // Cerrar conexión al terminar
         process.on('SIGINT', async () => {
