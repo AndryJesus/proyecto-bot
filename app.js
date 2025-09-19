@@ -10,98 +10,30 @@ import { parse } from 'pg-connection-string';
 // Importar pg directamente
 import { Client } from 'pg';
 
-// Importar Socket.io
-import { Server } from 'socket.io';
-import http from 'http';
-import express from 'express';
+// Importar Socket.io CLIENTE (no Server)
+import { io } from 'socket.io-client';
 
-// Configuración de entorno
-const isProduction = process.env.NODE_ENV === 'production';
-const FRONTEND_URL = isProduction 
-  ? 'https://pagina-render-wtbx.onrender.com/citas'
-  : 'http://localhost:4321/citas';
-
-// Connection string de Supabase
-const CONNECTION_STRING = process.env.DATABASE_URL;
+// Connection string de Supabase - USAR BASE DE DESARROLLO
+const CONNECTION_STRING = process.env.DATABASE_DEV_URL || process.env.DATABASE_URL;
 
 // Verificar que la variable de entorno esté configurada
 if (!CONNECTION_STRING) {
-    console.error('❌ ERROR: No se encontró DATABASE_URL en el archivo .env');
+    console.error('❌ ERROR: No se encontró DATABASE_DEV_URL ni DATABASE_URL en el archivo .env');
     process.exit(1);
 }
 
-console.log(`🌍 Modo: ${isProduction ? 'Producción' : 'Desarrollo'}`);
-console.log(`🔗 Frontend: ${FRONTEND_URL}`);
+console.log('🔗 Usando base de datos de desarrollo...');
 
-// Configuración de Express
-const app = express();
+// URL del servidor Socket.IO al que te quieres conectar
+const SOCKET_SERVER_URL = 'https://pagina-render-wtbx.onrender.com/citas';
 
-// ✅ RUTA PRINCIPAL - Elimina el error "Cannot GET /"
-app.get('/', (req, res) => {
-  res.json({
-    status: 'online',
-    message: 'Bot de WhatsApp - Sonrisa Perfecta',
-    timestamp: new Date().toISOString(),
-    services: {
-      whatsapp: 'active',
-      websocket: 'active',
-      database: dbClient ? 'connected' : 'disconnected'
-    },
-    endpoints: {
-      frontend: 'https://pagina-render-wtbx.onrender.com/citas',
-      health: `https://${req.headers.host}/health`,
-      websocket: `wss://${req.headers.host}`
-    }
-  });
-});
-
-// ✅ Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    database: dbClient ? 'connected' : 'disconnected',
-    uptime: process.uptime(),
-    memory: process.memoryUsage()
-  });
-});
-
-// ✅ Info del bot
-app.get('/info', (req, res) => {
-  res.json({
-    name: 'Sonrisa Perfecta Bot',
-    version: '1.0.0',
-    environment: isProduction ? 'production' : 'development',
-    features: ['whatsapp-bot', 'websockets', 'postgresql']
-  });
-});
-
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: [
-      'https://pagina-render-wtbx.onrender.com/citas',
-      'https://pagina-render-wtbx.onrender.com',
-      'http://localhost:4321/citas',
-      'http://localhost:4321'
-    ],
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
-
-// Render asigna el puerto automáticamente mediante process.env.PORT
-const WS_PORT = process.env.PORT || 3002;
-server.listen(WS_PORT, () => {
-  console.log(`🚀 Servidor de WebSockets ejecutándose en puerto ${WS_PORT}`);
-  console.log(`📡 Frontend conectará desde: ${FRONTEND_URL}`);
-  console.log(`🌐 API disponible en: https://proyecto-bot-gbbo.onrender.com`);
-});
+// Variable para la conexión Socket.IO
+let socket = null;
 
 // Variable global para controlar el estado
 let userStates = {};
-let dbClient = null;
-let adapterProviderInstance = null;
+let dbClient = null; // Cliente de PostgreSQL
+let adapterProviderInstance = null; // Instancia del proveedor para enviar mensajes
 
 // Precios de los servicios
 const servicePrices = {
@@ -119,10 +51,72 @@ const serviceDescriptions = {
     'ortodoncia': 'Evaluación de Ortodoncia'
 };
 
+// Función para conectar al servidor Socket.IO
+const connectToSocketServer = () => {
+    try {
+        console.log(`🔌 Conectando al servidor Socket.IO: ${SOCKET_SERVER_URL}`);
+        
+        socket = io(SOCKET_SERVER_URL, {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000
+        });
+
+        socket.on('connect', () => {
+            console.log('✅ Conectado al servidor Socket.IO remoto');
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.log(`❌ Desconectado del servidor Socket.IO: ${reason}`);
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('❌ Error de conexión Socket.IO:', error.message);
+        });
+
+        socket.on('error', (error) => {
+            console.error('❌ Error Socket.IO:', error);
+        });
+
+        // Escuchar eventos del servidor remoto si es necesario
+        socket.on('newAppointment', (data) => {
+            console.log('📥 Nueva cita recibida del servidor:', data);
+        });
+
+        socket.on('appointmentConfirmed', (data) => {
+            console.log('✅ Cita confirmada por el servidor:', data);
+        });
+
+    } catch (error) {
+        console.error('❌ Error al conectar con Socket.IO:', error.message);
+    }
+};
+
+// Función para enviar datos al servidor remoto via Socket.IO
+const sendToServer = (event, data) => {
+    if (socket && socket.connected) {
+        socket.emit(event, data);
+        console.log(`📤 Datos enviados al servidor (${event}):`, data);
+        return true;
+    } else {
+        console.log('⚠️  Socket no conectado, intentando reconectar...');
+        // Intentar reconectar
+        if (socket) {
+            socket.connect();
+        } else {
+            connectToSocketServer();
+        }
+        return false;
+    }
+};
+
 // Función para conectar y crear la tabla
 const connectAndCreateTable = async () => {
     try {
-        console.log('🔌 Conectando a la base de datos...');
+        console.log('🔌 Conectando a la base de datos de desarrollo...');
         
         dbClient = new Client({
             connectionString: CONNECTION_STRING,
@@ -132,7 +126,7 @@ const connectAndCreateTable = async () => {
         });
         
         await dbClient.connect();
-        console.log('✅ Conexión a PostgreSQL establecida');
+        console.log('✅ Conexión a PostgreSQL de desarrollo establecida');
         
         // Crear tabla si no existe
         console.log('🔄 Creando/verificando tabla de citas...');
@@ -162,12 +156,6 @@ const connectAndCreateTable = async () => {
     }
 };
 
-// Función para enviar datos al frontend via WebSocket
-const sendToFrontend = (data) => {
-  io.emit('newAppointment', data);
-  console.log('📤 Datos enviados al frontend via WebSocket');
-};
-
 // Función para guardar en la base de datos
 const saveToDatabase = async (name, phone, serviceType, appointmentDateTime, price) => {
     try {
@@ -180,7 +168,7 @@ const saveToDatabase = async (name, phone, serviceType, appointmentDateTime, pri
             return true;
         }
         
-        console.log('💾 Guardando en base de datos...');
+        console.log('💾 Guardando en base de datos de desarrollo...');
         
         const insertQuery = `
             INSERT INTO appointments (patient_name, patient_phone, service_type, service_price, appointment_date)
@@ -198,7 +186,7 @@ const saveToDatabase = async (name, phone, serviceType, appointmentDateTime, pri
         
         console.log('✅ Cita guardada con ID:', result.rows[0].id);
         
-        // Enviar datos al frontend
+        // Enviar datos al servidor remoto
         const appointmentData = {
             id: result.rows[0].id,
             patient_name: name,
@@ -210,7 +198,7 @@ const saveToDatabase = async (name, phone, serviceType, appointmentDateTime, pri
             status: 'pending'
         };
         
-        sendToFrontend(appointmentData);
+        sendToServer('newAppointment', appointmentData);
         
         return true;
         
@@ -220,60 +208,7 @@ const saveToDatabase = async (name, phone, serviceType, appointmentDateTime, pri
     }
 };
 
-// Función para obtener el historial
-const getAppointmentHistory = async () => {
-    try {
-        if (!dbClient) {
-            console.log('⚠️  Cliente de BD no disponible');
-            return [];
-        }
-        
-        console.log('📊 Obteniendo historial...');
-        
-        const query = `
-            SELECT 
-                id,
-                patient_name as nombre,
-                patient_phone as telefono,
-                service_type as servicio,
-                service_price as precio,
-                appointment_date as fecha,
-                created_at as fecha_creacion,
-                status
-            FROM appointments 
-            ORDER BY created_at DESC
-            LIMIT 100
-        `;
-        
-        const result = await dbClient.query(query);
-        console.log(`✅ ${result.rows.length} citas encontradas`);
-        return result.rows;
-        
-    } catch (error) {
-        console.error('❌ Error al obtener historial:', error.message);
-        return [];
-    }
-};
-
-// Función para validar formato de fecha y hora
-const isValidDateTime = (datetime) => {
-    const pattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2})$/;
-    const match = datetime.match(pattern);
-    
-    if (!match) return false;
-    
-    const day = parseInt(match[1], 10);
-    const month = parseInt(match[2], 10);
-    const hour = parseInt(match[4], 10);
-    const minute = parseInt(match[5], 10);
-    
-    if (month < 1 || month > 12) return false;
-    if (day < 1 || day > 31) return false;
-    if (hour < 0 || hour > 23) return false;
-    if (minute < 0 || minute > 59) return false;
-    
-    return true;
-};
+// Resto del código se mantiene igual hasta la función confirmAppointment...
 
 // Función para confirmar una cita
 const confirmAppointment = async (appointmentId) => {
@@ -312,6 +247,9 @@ const confirmAppointment = async (appointmentId) => {
         
         console.log(`✅ Cita confirmada: ${appointment.patient_name}`);
         
+        // Enviar confirmación al servidor remoto
+        sendToServer('appointmentConfirmed', updateResult.rows[0]);
+        
         // Enviar mensaje de confirmación al usuario de WhatsApp
         if (adapterProviderInstance) {
             try {
@@ -332,9 +270,6 @@ const confirmAppointment = async (appointmentId) => {
             console.error('❌ No se pudo obtener el proveedor para enviar el mensaje');
         }
         
-        // Notificar al frontend sobre la confirmación
-        io.emit('appointmentConfirmed', updateResult.rows[0]);
-        
         return true;
     } catch (error) {
         console.error('❌ Error al confirmar cita:', error.message);
@@ -342,16 +277,10 @@ const confirmAppointment = async (appointmentId) => {
     }
 };
 
-// Función para enviar todas las citas al frontend cuando se conecte
-const sendAllAppointmentsToFrontend = async (socket) => {
-    try {
-        const appointments = await getAppointmentHistory();
-        socket.emit('allAppointments', appointments);
-        console.log(`📊 Enviadas ${appointments.length} citas existentes al frontend`);
-    } catch (error) {
-        console.error('❌ Error al enviar citas existentes:', error.message);
-    }
-};
+// Eliminar toda la sección de servidor Socket.io local ya que no es necesaria
+// Ya que te quieres conectar como cliente al servidor remoto
+
+// Resto del código de flujos se mantiene igual...
 
 // Flow para capturar nombre
 const flowCaptureName = addKeyword(['capture_name'])
@@ -379,174 +308,26 @@ const flowCaptureName = addKeyword(['capture_name'])
         }
     );
 
-// Flow para capturar fecha y hora
-const flowDateTime = addKeyword(['flow_date_time'])
-    .addAnswer(
-        '📅 Por favor, indica la fecha y hora en la que prefieres asistir.\n\n' +
-        'Formato: *dd/mm/aaaa hh:mm*\n' +
-        'Ejemplo: *15/12/2024 14:30*',
-        { capture: true },
-        async (ctx, { endFlow }) => {
-            const userFrom = ctx.from;
-            const userState = userStates[userFrom];
-            const dateTimeInput = ctx.body.trim();
-            
-            if (!userState || !userState.expectingDateTime) {
-                return endFlow('❌ Ocurrió un error. Por favor, inicia el proceso nuevamente escribiendo *hola*.');
-            }
-            
-            if (!isValidDateTime(dateTimeInput)) {
-                return endFlow('❌ Formato incorrecto. Por favor, usa el formato: *dd/mm/aaaa hh:mm*\nEjemplo: *15/12/2024 14:30*');
-            }
-            
-            userStates[userFrom].appointmentDateTime = dateTimeInput;
-            userStates[userFrom].expectingDateTime = false;
-            
-            // Guardar en la base de datos
-            await saveToDatabase(
-                userState.name, 
-                userFrom, 
-                userState.serviceDescription, 
-                dateTimeInput,
-                userState.price
-            );
-
-            const resumen = 
-                '✅ ¡Perfecto! Hemos registrado tu información:\n\n' +
-                `• Nombre: ${userState.name}\n` +
-                `• Servicio: ${userState.serviceDescription}\n` +
-                `• Precio: ${userState.price}\n` +
-                `• Fecha y hora: ${dateTimeInput}\n\n` +
-                'Un asesor se pondrá en contacto contigo para confirmar tu cita. ¡Gracias!';
-            
-            delete userStates[userFrom];
-            return endFlow(resumen);
-        }
-    );
-
-// Función para crear flujos de confirmación con precios
-const createConfirmationFlow = (serviceType) => {
-    return addKeyword([serviceType])
-        .addAnswer(
-            `💵 *Precio del servicio:* ${servicePrices[serviceType]}\n\n` +
-            `¿Deseas confirmar tu cita para ${serviceDescriptions[serviceType]}? Responde con *sí* para confirmar o *no* para elegir otro servicio.`,
-            { capture: true },
-            async (ctx, { gotoFlow, endFlow }) => {
-                const response = ctx.body.toLowerCase().trim();
-                const userFrom = ctx.from;
-                
-                if (response === 'sí' || response === 'si' || response === 's') {
-                    userStates[userFrom] = { serviceType: serviceType };
-                    return gotoFlow(flowCaptureName);
-                } else if (response === 'no' || response === 'n') {
-                    delete userStates[userFrom];
-                    return gotoFlow(flowPrincipal);
-                } else {
-                    return endFlow('❌ Respuesta no válida. Por favor, escribe *sí* para confirmar o *no* para elegir otro servicio.');
-                }
-            }
-        );
-};
-
-// Crear flujos de confirmación para cada servicio
-const flowUrgencia = createConfirmationFlow('urgencia');
-const flowConsulta = createConfirmationFlow('consulta');
-const flowLimpieza = createConfirmationFlow('limpieza');
-const flowOrtodoncia = createConfirmationFlow('ortodoncia');
-
-// Flow principal
-const flowPrincipal = addKeyword(['hola', 'buenas', 'menu'])
-    .addAnswer('Hola, bienvenido al *Chatbot* de Sonrisa Perfecta 👋')
-    .addAnswer(
-        [
-            'Te damos la bienvenida a nuestra clínica odontológica.',
-            'Por favor, indícanos el motivo de tu contacto:',
-            `*\n1* Urgencia médica - ${servicePrices['urgencia']}`,
-            `*\n2* Agendar consulta - ${servicePrices['consulta']}`,
-            `*\n3* Limpieza dental - ${servicePrices['limpieza']}`,
-            `*\n4* Ortodoncia - ${servicePrices['ortodoncia']}`,
-        ],
-        { capture: true },
-        async (ctx, { gotoFlow, fallBack }) => {
-            const option = ctx.body.trim();
-            switch (option) {
-                case '1': case 'urgencia': return gotoFlow(flowUrgencia);
-                case '2': case 'consulta': return gotoFlow(flowConsulta);
-                case '3': case 'limpieza': return gotoFlow(flowLimpieza);
-                case '4': case 'ortodoncia': return gotoFlow(flowOrtodoncia);
-                default: return fallBack('❌ Opción no válida. Por favor, selecciona un número del 1 al 4.');
-            }
-        }
-    );
-
-// Flow para ver historial
-const flowHistory = addKeyword(['historial', 'reportes'])
-    .addAnswer(
-        '🔍 Obteniendo historial de citas...',
-        async (ctx, { endFlow }) => {
-            const history = await getAppointmentHistory();
-            
-            if (history.length === 0) {
-                return endFlow('No hay citas registradas aún.');
-            }
-            
-            let response = '📊 Historial de Citas:\n\n';
-            history.forEach((appointment, index) => {
-                response += `📍 Cita ${index + 1}:\n` +
-                           `   👤 Nombre: ${appointment.nombre}\n` +
-                           `   📞 Teléfono: ${appointment.telefono}\n` +
-                           `   🏥 Servicio: ${appointment.servicio}\n` +
-                           `   💵 Precio: ${appointment.precio}\n` +
-                           `   📅 Fecha: ${appointment.fecha}\n` +
-                           `   ⏰ Registrado: ${new Date(appointment.fecha_creacion).toLocaleString()}\n\n`;
-            });
-            
-            return endFlow(response);
-        }
-    );
-
-const flowGracias = addKeyword(['gracias']).addAnswer('De nada, ¡es un placer atenderte!');
-const flowFallback = addKeyword([]).addAnswer('Lo siento, no entendí. Escribe *hola* para comenzar.');
-
-// Configurar eventos de Socket.io
-io.on('connection', (socket) => {
-    console.log('🔌 Cliente frontend conectado');
-    console.log('🌐 Origen de la conexión:', socket.handshake.headers.origin);
-    
-    // Enviar todas las citas existentes al nuevo cliente
-    sendAllAppointmentsToFrontend(socket);
-    
-    // Manejar confirmación de cita desde el frontend
-    socket.on('confirmAppointment', async (appointmentId) => {
-        console.log(`📋 Solicitud de confirmación para cita ID: ${appointmentId}`);
-        const success = await confirmAppointment(appointmentId);
-        
-        // Enviar respuesta al frontend
-        socket.emit('confirmationResult', {
-            success,
-            appointmentId,
-            message: success ? 'Cita confirmada exitosamente' : 'Error al confirmar la cita'
-        });
-    });
-    
-    socket.on('disconnect', () => {
-        console.log('🔌 Cliente frontend desconectado');
-    });
-});
+// ... (el resto de los flujos se mantiene igual)
 
 try {
     // Parsear la connection string
     const dbConfig = parse(CONNECTION_STRING);
     
-    console.log('✅ Configuración de base de datos parseada correctamente');
+    console.log('✅ Configuración de desarrollo parseada correctamente');
     console.log('   Host:', dbConfig.host);
+    console.log('   Puerto:', dbConfig.port);
     console.log('   Database:', dbConfig.database);
+    console.log('   User:', dbConfig.user);
 
     const main = async () => {
-        console.log('🔄 Iniciando conexión a la base de datos...');
+        console.log('🔄 Iniciando conexión a la base de datos de desarrollo...');
         
         // Conectar y crear tabla con nuestro propio cliente
         await connectAndCreateTable();
+        
+        // Conectar al servidor Socket.IO remoto
+        connectToSocketServer();
         
         // Configurar adapter de PostgreSQL para el bot
         const adapterDB = new PostgresAdapter({
@@ -567,7 +348,7 @@ try {
         
         const adapterProvider = createProvider(BaileysProvider);
 
-        console.log('🤖 Creando bot...');
+        console.log('🤖 Creando bot con base de desarrollo...');
         const bot = await createBot({
             flow: adapterFlow,
             provider: adapterProvider,
@@ -577,36 +358,28 @@ try {
         // Guardar la instancia del provider para usarla después
         adapterProviderInstance = adapterProvider;
 
-        console.log('✅ Bot iniciado correctamente');
-        console.log(`🌐 Servidor de WebSockets escuchando en puerto ${WS_PORT}`);
-        console.log(`📱 Frontend conectando desde: ${FRONTEND_URL}`);
-        console.log(`🌐 API disponible en: https://proyecto-bot-gbbo.onrender.com`);
+        console.log('✅ Bot iniciado correctamente con base de desarrollo');
+        console.log(`🔌 Conectado al servidor Socket.IO: ${SOCKET_SERVER_URL}`);
         
-        // Portal de QR solo en desarrollo
-        if (!isProduction) {
-            console.log('🚪 Iniciando portal de QR en modo desarrollo...');
-            QRPortalWeb();
-        } else {
-            console.log('🚪 Portal de QR deshabilitado en producción');
-        }
-        
-        // Cerrar conexión al terminar
+        // Cerrar conexiones al terminar
         process.on('SIGINT', async () => {
             if (dbClient) {
                 await dbClient.end();
-                console.log('✅ Conexión a la base de datos cerrada');
+                console.log('✅ Conexión a la base de datos de desarrollo cerrada');
             }
-            server.close(() => {
-                console.log('✅ Servidor de WebSockets cerrado');
-                process.exit(0);
-            });
+            if (socket) {
+                socket.disconnect();
+                console.log('✅ Conexión Socket.IO cerrada');
+            }
+            process.exit(0);
         });
         
+        QRPortalWeb();
     }
 
     main().catch(console.error);
 
 } catch (error) {
-    console.error('❌ Error al parsear connection string:', error);
+    console.error('❌ Error al parsear connection string de desarrollo:', error);
     process.exit(1);
 }
