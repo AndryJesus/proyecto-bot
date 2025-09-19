@@ -18,8 +18,8 @@ import express from 'express';
 // Configuración de entorno
 const isProduction = process.env.NODE_ENV === 'production';
 const FRONTEND_URL = isProduction 
-  ? 'https://pagina-render-wtbx.onrender.com/citas'  // URL CORREGIDA con /citas
-  : 'http://localhost:4321/citas';                   // URL CORREGIDA con /citas
+  ? 'https://pagina-render-wtbx.onrender.com/citas'
+  : 'http://localhost:4321/citas';
 
 // Connection string de Supabase
 const CONNECTION_STRING = process.env.DATABASE_URL;
@@ -33,16 +33,57 @@ if (!CONNECTION_STRING) {
 console.log(`🌍 Modo: ${isProduction ? 'Producción' : 'Desarrollo'}`);
 console.log(`🔗 Frontend: ${FRONTEND_URL}`);
 
-// Configuración de Express y Socket.io
+// Configuración de Express
 const app = express();
+
+// ✅ RUTA PRINCIPAL - Elimina el error "Cannot GET /"
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    message: 'Bot de WhatsApp - Sonrisa Perfecta',
+    timestamp: new Date().toISOString(),
+    services: {
+      whatsapp: 'active',
+      websocket: 'active',
+      database: dbClient ? 'connected' : 'disconnected'
+    },
+    endpoints: {
+      frontend: 'https://pagina-render-wtbx.onrender.com/citas',
+      health: `https://${req.headers.host}/health`,
+      websocket: `wss://${req.headers.host}`
+    }
+  });
+});
+
+// ✅ Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    database: dbClient ? 'connected' : 'disconnected',
+    uptime: process.uptime(),
+    memory: process.memoryUsage()
+  });
+});
+
+// ✅ Info del bot
+app.get('/info', (req, res) => {
+  res.json({
+    name: 'Sonrisa Perfecta Bot',
+    version: '1.0.0',
+    environment: isProduction ? 'production' : 'development',
+    features: ['whatsapp-bot', 'websockets', 'postgresql']
+  });
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: [
-      'https://pagina-render-wtbx.onrender.com/citas',  // Página específica de citas
-      'https://pagina-render-wtbx.onrender.com',        // Página principal (backup)
-      'http://localhost:4321/citas',                    // Desarrollo específico
-      'http://localhost:4321'                           // Desarrollo principal
+      'https://pagina-render-wtbx.onrender.com/citas',
+      'https://pagina-render-wtbx.onrender.com',
+      'http://localhost:4321/citas',
+      'http://localhost:4321'
     ],
     methods: ["GET", "POST"],
     credentials: true
@@ -54,12 +95,13 @@ const WS_PORT = process.env.PORT || 3002;
 server.listen(WS_PORT, () => {
   console.log(`🚀 Servidor de WebSockets ejecutándose en puerto ${WS_PORT}`);
   console.log(`📡 Frontend conectará desde: ${FRONTEND_URL}`);
+  console.log(`🌐 API disponible en: https://proyecto-bot-gbbo.onrender.com`);
 });
 
 // Variable global para controlar el estado
 let userStates = {};
-let dbClient = null; // Cliente de PostgreSQL
-let adapterProviderInstance = null; // Instancia del proveedor para enviar mensajes
+let dbClient = null;
+let adapterProviderInstance = null;
 
 // Precios de los servicios
 const servicePrices = {
@@ -538,6 +580,7 @@ try {
         console.log('✅ Bot iniciado correctamente');
         console.log(`🌐 Servidor de WebSockets escuchando en puerto ${WS_PORT}`);
         console.log(`📱 Frontend conectando desde: ${FRONTEND_URL}`);
+        console.log(`🌐 API disponible en: https://proyecto-bot-gbbo.onrender.com`);
         
         // Portal de QR solo en desarrollo
         if (!isProduction) {
