@@ -1,0 +1,36 @@
+{
+    "name": "base-bailey-postgres",
+    "version": "1.0.0",
+    "description": "<p align=\"center\">   <img width=\"300\" src=\"https://i.imgur.com/Oauef6t.png\"> </p>",
+    "main": "app.js",
+    "type": "module",
+    "scripts": {
+        "pre-copy": "cd .. && npm run  copy.lib base-baileys-postgres",
+        "start": "node app.js"
+    },
+    "keywords": [],
+    "dependencies": {
+        "@bot-whatsapp/bot": "latest",
+        "@bot-whatsapp/cli": "latest",
+        "@bot-whatsapp/database": "latest",
+        "@bot-whatsapp/portal": "latest",
+        "@bot-whatsapp/provider": "latest",
+        "@whiskeysockets/baileys": "6.5.0",
+        "cache-manager": "5.2.4",
+        "dotenv": "^17.2.2",
+        "express": "^5.1.0",
+        "jsonwebtoken": "^9.0.2",
+        "node-fetch": "^3.3.2",
+        "pg": "^8.16.3",
+        "pg-connection-string": "^2.9.1",
+        "socket.io": "^4.8.1",
+        "socket.io-client": "^4.8.1",
+        "wa-sticker-formatter": "4.4.4"
+    },
+    "devDependencies": {
+        "eslint": "^8.52.0",
+        "eslint-plugin-bot-whatsapp": "latest"
+    },
+    "author": "",
+    "license": "ISC"
+}
