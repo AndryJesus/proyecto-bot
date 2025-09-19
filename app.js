@@ -15,31 +15,40 @@ import { Server } from 'socket.io';
 import http from 'http';
 import express from 'express';
 
-// Connection string de Supabase - USAR BASE DE DESARROLLO
-const CONNECTION_STRING = process.env.DATABASE_DEV_URL || process.env.DATABASE_URL;
+// Configuración de entorno
+const isProduction = process.env.NODE_ENV === 'production';
+const FRONTEND_URL = isProduction 
+  ? 'https://pagina-render-wtbx.onrender.com' 
+  : 'http://localhost:4321';
+
+// Connection string de Supabase
+const CONNECTION_STRING = process.env.DATABASE_URL;
 
 // Verificar que la variable de entorno esté configurada
 if (!CONNECTION_STRING) {
-    console.error('❌ ERROR: No se encontró DATABASE_DEV_URL ni DATABASE_URL en el archivo .env');
+    console.error('❌ ERROR: No se encontró DATABASE_URL en el archivo .env');
     process.exit(1);
 }
 
-console.log('🔗 Usando base de datos de desarrollo...');
+console.log(`🌍 Modo: ${isProduction ? 'Producción' : 'Desarrollo'}`);
+console.log(`🔗 Frontend: ${FRONTEND_URL}`);
 
 // Configuración de Express y Socket.io
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:4321", // URL de tu frontend Astro
-    methods: ["GET", "POST"]
+    origin: FRONTEND_URL,
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
-// Iniciar servidor de WebSockets en un puerto DIFERENTE al del bot
-const WS_PORT = process.env.WS_PORT || 3002;
+// Render asigna el puerto automáticamente mediante process.env.PORT
+const WS_PORT = process.env.PORT || 3002;
 server.listen(WS_PORT, () => {
   console.log(`🚀 Servidor de WebSockets ejecutándose en puerto ${WS_PORT}`);
+  console.log(`📡 Frontend conectará desde: ${FRONTEND_URL}`);
 });
 
 // Variable global para controlar el estado
@@ -66,7 +75,7 @@ const serviceDescriptions = {
 // Función para conectar y crear la tabla
 const connectAndCreateTable = async () => {
     try {
-        console.log('🔌 Conectando a la base de datos de desarrollo...');
+        console.log('🔌 Conectando a la base de datos...');
         
         dbClient = new Client({
             connectionString: CONNECTION_STRING,
@@ -76,7 +85,7 @@ const connectAndCreateTable = async () => {
         });
         
         await dbClient.connect();
-        console.log('✅ Conexión a PostgreSQL de desarrollo establecida');
+        console.log('✅ Conexión a PostgreSQL establecida');
         
         // Crear tabla si no existe
         console.log('🔄 Creando/verificando tabla de citas...');
@@ -124,7 +133,7 @@ const saveToDatabase = async (name, phone, serviceType, appointmentDateTime, pri
             return true;
         }
         
-        console.log('💾 Guardando en base de datos de desarrollo...');
+        console.log('💾 Guardando en base de datos...');
         
         const insertQuery = `
             INSERT INTO appointments (patient_name, patient_phone, service_type, service_price, appointment_date)
@@ -172,7 +181,7 @@ const getAppointmentHistory = async () => {
             return [];
         }
         
-        console.log('📊 Obteniendo historial de desarrollo...');
+        console.log('📊 Obteniendo historial...');
         
         const query = `
             SELECT 
@@ -190,7 +199,7 @@ const getAppointmentHistory = async () => {
         `;
         
         const result = await dbClient.query(query);
-        console.log(`✅ ${result.rows.length} citas encontradas en desarrollo`);
+        console.log(`✅ ${result.rows.length} citas encontradas`);
         return result.rows;
         
     } catch (error) {
@@ -400,7 +409,7 @@ const flowOrtodoncia = createConfirmationFlow('ortodoncia');
 
 // Flow principal
 const flowPrincipal = addKeyword(['hola', 'buenas', 'menu'])
-    .addAnswer('Hola, bienvenido al *Chatbot* de Sonrisa Perfecta 👋')
+    .addAnswer('Hla, bienvenido al *Chatbot* de Sonrisa Perfecta 👋')
     .addAnswer(
         [
             'Te damos la bienvenida a nuestra clínica odontológica.',
@@ -481,14 +490,12 @@ try {
     // Parsear la connection string
     const dbConfig = parse(CONNECTION_STRING);
     
-    console.log('✅ Configuración de desarrollo parseada correctamente');
+    console.log('✅ Configuración de base de datos parseada correctamente');
     console.log('   Host:', dbConfig.host);
-    console.log('   Puerto:', dbConfig.port);
     console.log('   Database:', dbConfig.database);
-    console.log('   User:', dbConfig.user);
 
     const main = async () => {
-        console.log('🔄 Iniciando conexión a la base de datos de desarrollo...');
+        console.log('🔄 Iniciando conexión a la base de datos...');
         
         // Conectar y crear tabla con nuestro propio cliente
         await connectAndCreateTable();
@@ -512,7 +519,7 @@ try {
         
         const adapterProvider = createProvider(BaileysProvider);
 
-        console.log('🤖 Creando bot con base de desarrollo...');
+        console.log('🤖 Creando bot...');
         const bot = await createBot({
             flow: adapterFlow,
             provider: adapterProvider,
@@ -522,15 +529,15 @@ try {
         // Guardar la instancia del provider para usarla después
         adapterProviderInstance = adapterProvider;
 
-        console.log('✅ Bot iniciado correctamente con base de desarrollo');
+        console.log('✅ Bot iniciado correctamente');
         console.log(`🌐 Servidor de WebSockets escuchando en puerto ${WS_PORT}`);
-        console.log(`📱 Frontend debe conectarse a: http://localhost:${WS_PORT}`);
+        console.log(`📱 Frontend conectando desde: ${FRONTEND_URL}`);
         
         // Cerrar conexión al terminar
         process.on('SIGINT', async () => {
             if (dbClient) {
                 await dbClient.end();
-                console.log('✅ Conexión a la base de datos de desarrollo cerrada');
+                console.log('✅ Conexión a la base de datos cerrada');
             }
             server.close(() => {
                 console.log('✅ Servidor de WebSockets cerrado');
@@ -544,6 +551,6 @@ try {
     main().catch(console.error);
 
 } catch (error) {
-    console.error('❌ Error al parsear connection string de desarrollo:', error);
+    console.error('❌ Error al parsear connection string:', error);
     process.exit(1);
 }
