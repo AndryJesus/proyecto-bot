@@ -529,7 +529,7 @@ try {
         console.log('✅ Bot iniciado correctamente con base de desarrollo');
         
         // 🚨 USAR EL PUERTO PRINCIPAL DE RENDER
-        const PORT = process.env.PORT || 3001;
+        const PORT = process.env.PORT || 3002;
         server.listen(PORT, () => {
             console.log(`🚀 Bot y WebSockets ejecutándose en puerto ${PORT}`);
             console.log(`📱 Frontend debe conectarse a este mismo puerto`);
