@@ -35,7 +35,7 @@ const app = express();
 // ✅ MIDDLEWARE CORS PARA EXPRESS
 app.use((req, res, next) => {
     const allowedOrigins = [
-        'https://pagina-render-wtbx.onrender.com',
+        'https://pagina-render-wtbx.onrender.com/citas/',
         'https://proyecto-bot-gbbo.onrender.com'
     ];
     
