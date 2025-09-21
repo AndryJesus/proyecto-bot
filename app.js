@@ -34,7 +34,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "https://pagina-render-wtbx.onrender.com", // SOLO EL DOMINIO, sin /citas
+    origin: "https://pagina-render-wtbx.onrender.com/citas", // SOLO EL DOMINIO, sin /citas
     methods: ["GET", "POST"],
     credentials: true
   }
