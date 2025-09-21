@@ -1,7 +1,6 @@
 import pkg from '@bot-whatsapp/bot';
 const { createBot, createProvider, createFlow, addKeyword } = pkg;
 
-import QRPortalWeb from '@bot-whatsapp/portal';
 import BaileysProvider from '@bot-whatsapp/provider/baileys';
 import PostgresAdapter from '@bot-whatsapp/database/postgres';
 import 'dotenv/config';
@@ -14,6 +13,10 @@ import { Client } from 'pg';
 import { Server } from 'socket.io';
 import http from 'http';
 import express from 'express';
+
+// Importar módulos para el QR
+import { createReadStream, existsSync } from 'fs';
+import { join } from 'path';
 
 // Connection string de Supabase - USAR BASE DE DESARROLLO
 const CONNECTION_STRING = process.env.DATABASE_DEV_URL || process.env.DATABASE_URL;
@@ -481,6 +484,53 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ✅ ENDPOINT PARA OBTENER EL QR (MEJORADO)
+app.get("/get-qr", async (req, res) => {
+    try {
+        const YOUR_PATH_QR = join(process.cwd(), `bot.qr.png`);
+        
+        // Verificar si el archivo QR existe
+        if (!existsSync(YOUR_PATH_QR)) {
+            return res.status(404).json({ 
+                error: 'QR no disponible aún',
+                message: 'El bot se está iniciando, intenta nuevamente en unos segundos'
+            });
+        }
+
+        const fileStream = createReadStream(YOUR_PATH_QR);
+        
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Pragma", "no-cache");
+        
+        fileStream.pipe(res);
+        
+        console.log('📱 QR enviado a través del endpoint /get-qr');
+        
+        fileStream.on('error', (error) => {
+            console.error('❌ Error al leer el archivo QR:', error.message);
+            res.status(500).json({ error: 'Error al leer el QR' });
+        });
+        
+    } catch (error) {
+        console.error('❌ Error al enviar QR:', error.message);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// ✅ Endpoint para ver el estado del bot
+app.get('/bot-status', (req, res) => {
+    const qrPath = join(process.cwd(), `bot.qr.png`);
+    const hasQR = existsSync(qrPath);
+    
+    res.status(200).json({
+        status: hasQR ? 'QR_READY' : 'INITIALIZING',
+        message: hasQR ? 'Bot listo para escanear QR' : 'Bot inicializando',
+        qr_available: hasQR,
+        timestamp: new Date().toISOString()
+    });
+});
+
 try {
     // Parsear la connection string
     const dbConfig = parse(CONNECTION_STRING);
@@ -527,28 +577,32 @@ try {
         adapterProviderInstance = adapterProvider;
 
         console.log('✅ Bot iniciado correctamente con base de desarrollo');
+        console.log('📱 El QR estará disponible en: /get-qr');
+        console.log('📊 Estado del bot disponible en: /bot-status');
         
         // 🚨 USAR EL PUERTO PRINCIPAL DE RENDER
-        const PORT = process.env.PORT || 10000;
+        const PORT = process.env.PORT || 3002;
         server.listen(PORT, () => {
-            console.log(`🚀 Bot y WebSockets ejecutándose en puerto ${PORT}`);
-            console.log(`📱 Frontend debe conectarse a este mismo puerto`);
-            console.log(`🌐 Health check disponible en: /health`);
+            console.log(`🚀 Servidor ejecutándose en puerto ${PORT}`);
+            console.log(`🌐 Health check: http://localhost:${PORT}/health`);
+            console.log(`📱 QR endpoint: http://localhost:${PORT}/get-qr`);
+            console.log(`🤖 Bot status: http://localhost:${PORT}/bot-status`);
+            console.log(`🔌 WebSockets: ws://localhost:${PORT}`);
         });
         
         // Cerrar conexión al terminar
         process.on('SIGINT', async () => {
+            console.log('\n🛑 Apagando servidor...');
             if (dbClient) {
                 await dbClient.end();
-                console.log('✅ Conexión a la base de datos de desarrollo cerrada');
+                console.log('✅ Conexión a la base de datos cerrada');
             }
             server.close(() => {
-                console.log('✅ Servidor de WebSockets cerrado');
+                console.log('✅ Servidor cerrado');
                 process.exit(0);
             });
         });
         
-        QRPortalWeb();
     }
 
     main().catch(console.error);
