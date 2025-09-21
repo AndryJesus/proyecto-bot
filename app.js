@@ -32,24 +32,32 @@ console.log('🔗 Usando base de datos de desarrollo...');
 // Configuración de Express y Socket.io
 const app = express();
 
-// ✅ MIDDLEWARE CORS PARA EXPRESS
+// ✅ MIDDLEWARE CORS MEJORADO
 app.use((req, res, next) => {
     const allowedOrigins = [
-        'https://pagina-render-wtbx.onrender.com/citas/',
-        'https://proyecto-bot-gbbo.onrender.com'
+        'https://pagina-render-wtbx.onrender.com',
+        'https://proyecto-bot-gbbo.onrender.com',
+        'http://localhost:3000',
+        'http://localhost:3002',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:3002'
     ];
     
     const origin = req.headers.origin;
     if (allowedOrigins.includes(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+        // Permitir cualquier origen en desarrollo
+        res.setHeader('Access-Control-Allow-Origin', '*');
     }
     
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
     
     if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
+        return res.status(200).end();
     }
     
     next();
@@ -57,14 +65,19 @@ app.use((req, res, next) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: [
-      "https://pagina-render-wtbx.onrender.com",
-      "https://proyecto-bot-gbbo.onrender.com"
-    ],
-    methods: ["GET", "POST"],
-    credentials: true
-  }
+    cors: {
+        origin: [
+            "https://pagina-render-wtbx.onrender.com",
+            "https://proyecto-bot-gbbo.onrender.com",
+            "http://localhost:3000",
+            "http://localhost:3002",
+            "http://127.0.0.1:3000", 
+            "http://127.0.0.1:3002"
+        ],
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        credentials: true,
+        allowedHeaders: ["Content-Type", "Authorization"]
+    }
 });
 
 // Variable global para controlar el estado
@@ -480,6 +493,7 @@ const flowFallback = addKeyword([]).addAnswer('Lo siento, no entendí. Escribe *
 // Configurar eventos de Socket.io
 io.on('connection', (socket) => {
     console.log('🔌 Cliente frontend conectado');
+    console.log('📍 Origen del cliente:', socket.handshake.headers.origin);
     
     // Enviar todas las citas existentes al nuevo cliente
     sendAllAppointmentsToFrontend(socket);
@@ -506,21 +520,34 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('🔌 Cliente frontend desconectado');
     });
+    
+    // Manejar errores de conexión
+    socket.on('error', (error) => {
+        console.error('❌ Error de Socket.io:', error);
+    });
 });
 
 // Endpoint de health check para Render
 app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
-    message: 'Bot and WebSockets running',
-    timestamp: new Date().toISOString(),
-    totalAppointments: allAppointments ? allAppointments.length : 0
-  });
+    console.log('🔍 Health check solicitado desde:', req.headers.origin);
+    res.status(200).json({ 
+        status: 'OK', 
+        message: 'Bot and WebSockets running',
+        timestamp: new Date().toISOString(),
+        totalAppointments: allAppointments ? allAppointments.length : 0,
+        cors: {
+            allowedOrigins: [
+                'https://pagina-render-wtbx.onrender.com',
+                'https://proyecto-bot-gbbo.onrender.com'
+            ]
+        }
+    });
 });
 
 // ✅ ENDPOINT PARA OBTENER EL QR (MEJORADO)
 app.get("/get-qr", async (req, res) => {
     try {
+        console.log('📱 Solicitud de QR desde:', req.headers.origin);
         const YOUR_PATH_QR = join(process.cwd(), `bot.qr.png`);
         
         // Verificar si el archivo QR existe
@@ -536,10 +563,11 @@ app.get("/get-qr", async (req, res) => {
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Pragma", "no-cache");
+        res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
         
         fileStream.pipe(res);
         
-        console.log('📱 QR enviado a través del endpoint /get-qr');
+        console.log('📱 QR enviado correctamente');
         
         fileStream.on('error', (error) => {
             console.error('❌ Error al leer el archivo QR:', error.message);
@@ -557,6 +585,8 @@ app.get('/bot-status', (req, res) => {
     const qrPath = join(process.cwd(), `bot.qr.png`);
     const hasQR = existsSync(qrPath);
     
+    res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+    
     res.status(200).json({
         status: hasQR ? 'QR_READY' : 'INITIALIZING',
         message: hasQR ? 'Bot listo para escanear QR' : 'Bot inicializando',
@@ -569,11 +599,16 @@ app.get('/bot-status', (req, res) => {
 // ✅ Endpoint para obtener citas via HTTP (fallback)
 app.get('/api/appointments', async (req, res) => {
     try {
+        console.log('📊 Solicitud de citas HTTP desde:', req.headers.origin);
         const appointments = await getAppointmentHistory();
+        
+        res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
         res.json(appointments);
+        
         console.log('📊 Citas enviadas via HTTP API');
     } catch (error) {
         console.error('❌ Error al obtener citas via HTTP:', error);
+        res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
         res.status(500).json({ error: 'Error al obtener citas' });
     }
 });
@@ -581,7 +616,10 @@ app.get('/api/appointments', async (req, res) => {
 // ✅ Endpoint para obtener estadísticas
 app.get('/api/stats', async (req, res) => {
     try {
+        console.log('📈 Solicitud de estadísticas desde:', req.headers.origin);
+        
         if (!dbClient) {
+            res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
             return res.status(500).json({ error: 'Base de datos no disponible' });
         }
         
@@ -595,12 +633,27 @@ app.get('/api/stats', async (req, res) => {
         `;
         
         const result = await dbClient.query(statsQuery);
+        
+        res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
         res.json(result.rows[0]);
         
     } catch (error) {
         console.error('❌ Error al obtener estadísticas:', error);
+        res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
         res.status(500).json({ error: 'Error al obtener estadísticas' });
     }
+});
+
+// ✅ Endpoint para probar CORS
+app.get('/api/test-cors', (req, res) => {
+    console.log('🧪 Test CORS desde:', req.headers.origin);
+    res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+    res.json({
+        success: true,
+        message: 'CORS configurado correctamente',
+        origin: req.headers.origin,
+        timestamp: new Date().toISOString()
+    });
 });
 
 try {
@@ -652,6 +705,7 @@ try {
         console.log('📱 El QR estará disponible en: /get-qr');
         console.log('📊 Estado del bot disponible en: /bot-status');
         console.log('🌐 API de citas disponible en: /api/appointments');
+        console.log('🧪 Test CORS disponible en: /api/test-cors');
         
         // 🚨 USAR EL PUERTO PRINCIPAL DE RENDER
         const PORT = process.env.PORT || 10000;
@@ -661,8 +715,13 @@ try {
             console.log(`📱 QR endpoint: http://localhost:${PORT}/get-qr`);
             console.log(`🤖 Bot status: http://localhost:${PORT}/bot-status`);
             console.log(`📊 API Citas: http://localhost:${PORT}/api/appointments`);
+            console.log(`🧪 Test CORS: http://localhost:${PORT}/api/test-cors`);
             console.log(`🔌 WebSockets: ws://localhost:${PORT}`);
-            console.log(`🌍 CORS habilitado para: https://pagina-render-wtbx.onrender.com`);
+            console.log(`🌍 CORS habilitado para:`);
+            console.log(`   - https://pagina-render-wtbx.onrender.com`);
+            console.log(`   - https://proyecto-bot-gbbo.onrender.com`);
+            console.log(`   - http://localhost:3000`);
+            console.log(`   - http://localhost:3002`);
         });
         
         // Cerrar conexión al terminar
