@@ -31,10 +31,37 @@ console.log('🔗 Usando base de datos de desarrollo...');
 
 // Configuración de Express y Socket.io
 const app = express();
+
+// ✅ MIDDLEWARE CORS PARA EXPRESS
+app.use((req, res, next) => {
+    const allowedOrigins = [
+        'https://pagina-render-wtbx.onrender.com',
+        'https://proyecto-bot-gbbo.onrender.com'
+    ];
+    
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    
+    next();
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "https://pagina-render-wtbx.onrender.com/citas", // SOLO EL DOMINIO, sin /citas
+    origin: [
+      "https://pagina-render-wtbx.onrender.com",
+      "https://proyecto-bot-gbbo.onrender.com"
+    ],
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -108,6 +135,17 @@ const connectAndCreateTable = async () => {
 const sendToFrontend = (data) => {
   io.emit('newAppointment', data);
   console.log('📤 Datos enviados al frontend via WebSocket');
+};
+
+// Función para enviar todas las citas al frontend
+const sendAllAppointmentsToFrontend = async (socket) => {
+    try {
+        const appointments = await getAppointmentHistory();
+        console.log(`📤 Enviando ${appointments.length} citas al frontend`);
+        socket.emit('allAppointments', appointments);
+    } catch (error) {
+        console.error('❌ Error al enviar citas existentes:', error.message);
+    }
 };
 
 // Función para guardar en la base de datos
@@ -284,17 +322,6 @@ const confirmAppointment = async (appointmentId) => {
     }
 };
 
-// Función para enviar todas las citas al frontend cuando se conecte
-const sendAllAppointmentsToFrontend = async (socket) => {
-    try {
-        const appointments = await getAppointmentHistory();
-        socket.emit('allAppointments', appointments);
-        console.log(`📊 Enviadas ${appointments.length} citas existentes al frontend`);
-    } catch (error) {
-        console.error('❌ Error al enviar citas existentes:', error.message);
-    }
-};
-
 // Flow para capturar nombre
 const flowCaptureName = addKeyword(['capture_name'])
     .addAnswer(
@@ -457,6 +484,12 @@ io.on('connection', (socket) => {
     // Enviar todas las citas existentes al nuevo cliente
     sendAllAppointmentsToFrontend(socket);
     
+    // Manejar solicitud explícita de citas
+    socket.on('getAllAppointments', async () => {
+        console.log('📋 Solicitando todas las citas...');
+        await sendAllAppointmentsToFrontend(socket);
+    });
+    
     // Manejar confirmación de cita desde el frontend
     socket.on('confirmAppointment', async (appointmentId) => {
         console.log(`📋 Solicitud de confirmación para cita ID: ${appointmentId}`);
@@ -480,7 +513,8 @@ app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'OK', 
     message: 'Bot and WebSockets running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    totalAppointments: allAppointments ? allAppointments.length : 0
   });
 });
 
@@ -527,8 +561,46 @@ app.get('/bot-status', (req, res) => {
         status: hasQR ? 'QR_READY' : 'INITIALIZING',
         message: hasQR ? 'Bot listo para escanear QR' : 'Bot inicializando',
         qr_available: hasQR,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        websocket_connections: io.engine.clientsCount
     });
+});
+
+// ✅ Endpoint para obtener citas via HTTP (fallback)
+app.get('/api/appointments', async (req, res) => {
+    try {
+        const appointments = await getAppointmentHistory();
+        res.json(appointments);
+        console.log('📊 Citas enviadas via HTTP API');
+    } catch (error) {
+        console.error('❌ Error al obtener citas via HTTP:', error);
+        res.status(500).json({ error: 'Error al obtener citas' });
+    }
+});
+
+// ✅ Endpoint para obtener estadísticas
+app.get('/api/stats', async (req, res) => {
+    try {
+        if (!dbClient) {
+            return res.status(500).json({ error: 'Base de datos no disponible' });
+        }
+        
+        const statsQuery = `
+            SELECT 
+                COUNT(*) as total,
+                COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+                COUNT(CASE WHEN status = 'confirmed' THEN 1 END) as confirmed,
+                COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled
+            FROM appointments
+        `;
+        
+        const result = await dbClient.query(statsQuery);
+        res.json(result.rows[0]);
+        
+    } catch (error) {
+        console.error('❌ Error al obtener estadísticas:', error);
+        res.status(500).json({ error: 'Error al obtener estadísticas' });
+    }
 });
 
 try {
@@ -579,15 +651,18 @@ try {
         console.log('✅ Bot iniciado correctamente con base de desarrollo');
         console.log('📱 El QR estará disponible en: /get-qr');
         console.log('📊 Estado del bot disponible en: /bot-status');
+        console.log('🌐 API de citas disponible en: /api/appointments');
         
         // 🚨 USAR EL PUERTO PRINCIPAL DE RENDER
-        const PORT = process.env.PORT || 3002;
+        const PORT = process.env.PORT || 10000;
         server.listen(PORT, () => {
             console.log(`🚀 Servidor ejecutándose en puerto ${PORT}`);
             console.log(`🌐 Health check: http://localhost:${PORT}/health`);
             console.log(`📱 QR endpoint: http://localhost:${PORT}/get-qr`);
             console.log(`🤖 Bot status: http://localhost:${PORT}/bot-status`);
+            console.log(`📊 API Citas: http://localhost:${PORT}/api/appointments`);
             console.log(`🔌 WebSockets: ws://localhost:${PORT}`);
+            console.log(`🌍 CORS habilitado para: https://pagina-render-wtbx.onrender.com`);
         });
         
         // Cerrar conexión al terminar
